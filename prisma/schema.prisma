@@ -198,7 +198,7 @@ model SiteSettings {
   announcement String @default("ارسال رایگان برای سفارش‌های بالای ۳ میلیون تومان")
   heroTitle String @default("درخشش، به زبان تو")
   heroSubtitle String @default("زیورهایی برای لحظه‌هایی که از آنِ تو هستند")
-  heroImage String @default("/images/hero.png")
+  heroImage String @default("/images/rose-hero.jpg")
   heroButton String @default("کشف مجموعه")
   heroLink String @default("/shop")
   contact String @default("۰۲۱–۲۲۳۴۵۶۷۸")

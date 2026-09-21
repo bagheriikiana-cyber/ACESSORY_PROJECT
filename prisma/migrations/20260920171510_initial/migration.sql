@@ -215,7 +215,7 @@ CREATE TABLE "SiteSettings" (
     "announcement" TEXT NOT NULL DEFAULT 'ارسال رایگان برای سفارش‌های بالای ۳ میلیون تومان',
     "heroTitle" TEXT NOT NULL DEFAULT 'درخشش، به زبان تو',
     "heroSubtitle" TEXT NOT NULL DEFAULT 'زیورهایی برای لحظه‌هایی که از آنِ تو هستند',
-    "heroImage" TEXT NOT NULL DEFAULT '/images/hero.png',
+    "heroImage" TEXT NOT NULL DEFAULT '/images/rose-hero.jpg',
     "heroButton" TEXT NOT NULL DEFAULT 'کشف مجموعه',
     "heroLink" TEXT NOT NULL DEFAULT '/shop',
     "contact" TEXT NOT NULL DEFAULT '۰۲۱–۲۲۳۴۵۶۷۸',

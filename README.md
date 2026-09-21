@@ -100,5 +100,4 @@ Font: Vazirmatn (SIL Open Font License). Campaign and product assets: original A
 
 ## Blush campaign redesign
 
-The storefront redesign is scoped to `src/app/(store)/storefront.css`; admin styling and backend architecture remain intact. Six coordinated original campaign photographs live in `public/images/rose-*.png`. Hero, product/category images, banners and copy are still read from the CMS. `node --env-file=.env scripts/rose-content.mjs` applies the initial campaign content once, retaining a backup in `.data/rose-content-backup.json` and preserving subsequent CMS edits. Seed defaults use the new campaign assets.
-
+The storefront redesign is scoped to `src/app/(store)/storefront.css`; admin styling and backend architecture remain intact. Six coordinated original campaign photographs live in `public/images/rose-*.jpg`. Hero, product/category images, banners and copy are still read from the CMS. `node --env-file=.env scripts/rose-content.mjs` applies the initial campaign content once, retaining a backup in `.data/rose-content-backup.json` and preserving subsequent CMS edits. Seed defaults use the new campaign assets.
