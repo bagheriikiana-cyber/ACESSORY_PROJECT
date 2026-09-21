@@ -1,0 +1,23 @@
+import { randomBytes } from 'node:crypto';
+import { PrismaClient } from '@prisma/client';
+import { hash } from 'bcryptjs';
+const db=new PrismaClient();
+async function main(){
+if(!process.env.SEED_ADMIN_PASSWORD || process.env.SEED_ADMIN_PASSWORD==='CHANGE_THIS_BEFORE_SEEDING')throw new Error('Set a strong SEED_ADMIN_PASSWORD first');
+const admin=await db.user.upsert({where:{email:process.env.SEED_ADMIN_EMAIL||'admin@mahneshan.local'},update:{},create:{email:process.env.SEED_ADMIN_EMAIL||'admin@mahneshan.local',name:'مدیر ماه‌نشان',password:await hash(process.env.SEED_ADMIN_PASSWORD,12),role:'ADMIN'}});
+const customer=await db.user.upsert({where:{email:'sara@example.com'},update:{},create:{email:'sara@example.com',name:'سارا مهران',mobile:'09121234567',password:await hash(process.env.SEED_CUSTOMER_PASSWORD || randomBytes(32).toString('hex'),12)}});
+const brands=await Promise.all(['ماه‌نشان','استودیو نور'].map(name=>db.brand.upsert({where:{name},update:{},create:{name}})));
+const defs=[['گردنبند','necklaces','/images/rose-necklace.png'],['دستبند','bracelets','/images/rose-bracelet.png'],['گوشواره','earrings','/images/rose-earrings.png'],['انگشتر','rings','/images/rose-ring.png'],['اکسسوری','accessories','/images/rose-hero.png']];
+const cats=await Promise.all(defs.map(([name,slug,image])=>db.category.upsert({where:{slug},update:{},create:{name,slug,image}})));
+const names=['گردنبند پیوند طلایی','گوشواره مروارید باران','انگشتر نور','دستبند زنجیری آوا','گردنبند ماه آرام','گوشواره حلقه‌ای سپید','انگشتر موج','دستبند مهتاب','آویز مروارید دریا','گردنبند خورشید','گوشواره شبنم','انگشتر پیچک','دستبند روشن','گیره موی صدف','گردنبند رها','گوشواره نگین سحر'];
+const indexes=[0,2,3,1,0,2,3,1,4,0,2,3,1,4,0,2];
+const products=[];
+for(let i=0;i<names.length;i++){const cat=cats[indexes[i]];const price=1250000+i*150000;products.push(await db.product.upsert({where:{slug:'jewel-'+(i+1)},update:{},create:{name:names[i],slug:'jewel-'+(i+1),sku:'MN-'+String(i+1).padStart(4,'0'),categoryId:cat.id,brandId:brands[i%2].id,description:'زیوری با طراحی آرام و ماندگار، برای همراهی با لحظه‌های روزمره و خاطره‌های خاص. پرداخت ظریف و فرم متعادل این قطعه، آن را به انتخابی دلنشین برای هدیه تبدیل می‌کند.',price,salePrice:i%5===0?price-200000:null,stock:i===9?3:20,featured:i<8,popularity:20-i,material:i%3===0?'نقره ۹۲۵':'نقره با روکش طلا',specifications:{'جنس':i%3===0?'نقره ۹۲۵':'نقره با روکش طلای ۱۸ عیار','رنگ':'طلایی','بسته‌بندی':'جعبه اختصاصی ماه‌نشان','نگهداری':'دور از عطر و رطوبت'},images:{create:[{url:cat.image,alt:names[i],position:0},{url:'/images/rose-hero.png',alt:'نمای مجموعه ماه‌نشان',position:1}]},variants:{create:[{color:'طلایی',size:'استاندارد',stock:i===9?3:10},{color:'نقره‌ای',size:'استاندارد',stock:i===9?0:10}]},createdAt:new Date(Date.now()-i*86400000)}}));}
+await db.siteSettings.upsert({where:{id:'main'},update:{},create:{id:'main',heroImage:'/images/rose-hero.png',heroTitle:'درخشش، به سبک تو',heroSubtitle:'ظرافتی برای لحظه‌هایی که ماندگار می‌شوند.',heroButton:'مشاهده کالکشن'}});
+if(!await db.banner.count())await db.banner.createMany({data:[{title:'سادگی، شکل دیگری از درخشش',subtitle:'مجموعه «ماه و نور»؛ پیوند لطافت مروارید و گرمای طلا. قطعه‌هایی که بی‌صدا، از شما می‌گویند.',image:'/images/rose-hero.png',button:'داستان این مجموعه',href:'/shop',placement:'collection'},{title:'هدیه‌ای به زیبایی یک احساس',subtitle:'برای کسی که حضورش، زندگی را زیباتر می‌کند. انتخابی ماندگار در بسته‌بندی اختصاصی ماه‌نشان.',image:'/images/rose-earrings.png',button:'انتخاب هدیه',href:'/shop?sort=popular',placement:'promo'}]});
+await db.coupon.upsert({where:{code:'WELCOME10'},update:{},create:{code:'WELCOME10',type:'percentage',value:10,minimum:1000000,maximum:500000,usageLimit:100}});
+for(const p of products.slice(0,4))await db.review.upsert({where:{userId_productId:{userId:customer.id,productId:p.id}},update:{},create:{userId:customer.id,productId:p.id,rating:5,text:'بسیار ظریف و خوش‌ساخت است. بسته‌بندی زیبا بود و به‌موقع به دستم رسید.',approved:true}});
+if(!await db.order.count()){for(let i=0;i<5;i++){const p=products[i];await db.order.create({data:{userId:customer.id,email:customer.email,address:{name:customer.name,mobile:customer.mobile,province:'تهران',city:'تهران',address:'خیابان ولیعصر، کوچه بهار، پلاک ۱۲',postalCode:'1234567890'},subtotal:p.price,shipping:80000,total:p.price+80000,status:['Delivered','Shipped','Processing','Pending','Pending'][i],paymentStatus:i<3?'PAID':'UNPAID',createdAt:new Date(Date.now()-i*86400000),items:{create:{productId:p.id,name:p.name,quantity:1,price:p.price,variant:'طلایی / استاندارد'}}}});}}
+console.log(`Seeded ${products.length} products, ${cats.length} categories. Admin: ${admin.email}`);
+}
+main().finally(()=>db.$disconnect());

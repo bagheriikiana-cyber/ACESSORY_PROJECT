@@ -1,0 +1,58 @@
+import assert from 'node:assert/strict';
+import { PrismaClient } from '@prisma/client';
+const db=new PrismaClient();
+const base=process.env.APP_URL||'http://localhost:3000';
+class Client { jar=new Map<string,string>(); async call(path:string,data?:unknown,method?:string){const r=await fetch(base+'/api/'+path,{method:method||(data===undefined?'GET':'POST'),headers:{'Content-Type':'application/json','Origin':base,'Cookie':[...this.jar].map(([k,v])=>`${k}=${v}`).join('; ')},body:data===undefined?undefined:JSON.stringify(data)});for(const c of r.headers.getSetCookie()){const [key,value]=c.split(';')[0].split('=');this.jar.set(key,value);}return {status:r.status,data:await r.json()};}}
+async function run(){
+const admin=new Client(),guest=new Client(),customer=new Client();
+assert.equal((await guest.call('admin/products')).status,403);
+assert.equal((await admin.call('auth/login',{email:process.env.SEED_ADMIN_EMAIL||'admin@mahneshan.local',password:process.env.SEED_ADMIN_PASSWORD})).status,200);
+const categories=(await admin.call('admin/categories')).data;
+const originalCoupon=await db.coupon.findUniqueOrThrow({where:{code:'WELCOME10'}});
+const suffix=Date.now();const slug='cms-test-'+suffix;
+const product={name:'زیور آزمایشی مدیریت '+suffix,slug,sku:'TEST-'+suffix,description:'محصول آزمون یکپارچه مدیریت و فروشگاه',price:2000000,salePrice:null,stock:4,categoryId:categories[0].id,brandId:null,material:'نقره',specifications:{'جنس':'نقره'},featured:true,active:true,seoTitle:'',seoDescription:'',collection:'آزمون',images:['/images/ring.png'],variants:[{color:'طلایی',size:'استاندارد',stock:4}]};
+let id='';let orderId='';let reviewId='';const email=`test-${suffix}@example.com`;let userId='';
+try {
+let result=await admin.call('admin/products',product);assert.equal(result.status,200,JSON.stringify(result.data));id=result.data.find((p:{slug:string})=>p.slug===slug).id;
+const page=await fetch(base+'/product/'+slug);assert.equal(page.status,200);assert.ok((await page.text()).includes(product.name));console.log('PASS: admin create -> storefront');
+result=await admin.call('admin/products/'+id,{...product,name:'ویرایش تأییدشده',price:2400000},'PUT');assert.equal(result.status,200);assert.ok((await(await fetch(base+'/product/'+slug)).text()).includes('ویرایش تأییدشده'));console.log('PASS: admin edit -> storefront');
+assert.equal((await guest.call('cart',{productId:id,variant:'طلایی / استاندارد',quantity:20})).status,400);
+assert.equal((await guest.call('cart',{productId:id,variant:'طلایی / استاندارد',quantity:2})).status,200);
+assert.equal((await guest.call('coupon',{code:'WELCOME10'})).data.discount,480000);
+assert.equal((await customer.call('auth/register',{email,password:'Integration!2026',name:'کاربر آزمون'})).status,200);userId=(await customer.call('me')).data.id;
+assert.equal((await customer.call('admin/products')).status,403);
+assert.equal((await customer.call('wishlist',{productId:id})).data.length,1);
+assert.equal((await customer.call('reviews',{productId:id,rating:5,text:'کیفیت محصول بسیار عالی است'})).status,200);
+reviewId=(await db.review.findFirstOrThrow({where:{productId:id}})).id;
+assert.equal((await admin.call('admin/reviews/'+reviewId,{approved:true},'PUT')).status,200);
+const address={name:'کاربر آزمون',mobile:'09121234567',province:'تهران',city:'تهران',address:'خیابان آزمایشی، پلاک دوازده',postalCode:'1234567890'};
+assert.equal((await customer.call('account/addresses',address)).status,200);
+await customer.call('cart',{productId:id,quantity:1,variant:'طلایی / استاندارد'});
+result=await customer.call('checkout',{address,email,notes:'آزمون',shippingMethod:'standard',coupon:'WELCOME10'});assert.equal(result.status,200,JSON.stringify(result.data));orderId=result.data.id;assert.equal(result.data.total,2240000);assert.equal(result.data.payment.status,'UNPAID');
+assert.equal((await customer.call('cart')).data.length,0);assert.equal((await db.product.findUniqueOrThrow({where:{id}})).stock,3);assert.equal((await customer.call('account/orders')).data[0].id,orderId);console.log('PASS: customer, wishlist, reviews, addresses, coupon, checkout, inventory');
+assert.equal((await admin.call('admin/orders/'+orderId,{status:'Cancelled'},'PUT')).status,200);assert.equal((await db.product.findUniqueOrThrow({where:{id}})).stock,4);await admin.call('admin/orders/'+orderId,{status:'Cancelled'},'PUT');assert.equal((await db.product.findUniqueOrThrow({where:{id}})).stock,4);console.log('PASS: cancellation restores stock once');
+const settings=(await admin.call('admin/settings')).data;
+const category={name:'دسته آزمون',slug:'test-category-'+suffix,image:'/images/ring.png',active:true,featured:true};
+let categoriesResult=await admin.call('admin/categories',category);assert.equal(categoriesResult.status,200);const categoryId=categoriesResult.data.find((r:{slug:string})=>r.slug===category.slug).id;
+try{categoriesResult=await admin.call('admin/categories/'+categoryId,{...category,name:'دسته ویرایش‌شده'},'PUT');assert.equal(categoriesResult.status,200);assert.ok((await(await fetch(base)).text()).includes('دسته ویرایش‌شده'));await admin.call('admin/categories/'+categoryId,undefined,'DELETE');assert.ok(!(await(await fetch(base)).text()).includes('دسته ویرایش‌شده'));}finally{await db.category.delete({where:{id:categoryId}});}console.log('PASS: category create/edit/disable');
+const couponData={code:'TEST'+suffix,type:'fixed',value:100000,minimum:0,maximum:null,expiresAt:null,usageLimit:2,active:true};
+let couponResult=await admin.call('admin/coupons',couponData);assert.equal(couponResult.status,200);const couponId=couponResult.data.find((r:{code:string})=>r.code===couponData.code).id;
+try{assert.equal((await guest.call('coupon',{code:couponData.code})).data.discount,100000);couponResult=await admin.call('admin/coupons/'+couponId,{...couponData,value:150000},'PUT');assert.equal(couponResult.status,200);assert.equal((await guest.call('coupon',{code:couponData.code})).data.discount,150000);assert.equal((await admin.call('admin/coupons/'+couponId,undefined,'DELETE')).status,200);assert.equal((await guest.call('coupon',{code:couponData.code})).status,400);}finally{await db.coupon.deleteMany({where:{id:couponId}});}console.log('PASS: coupon CRUD and recalculation');
+const bannerData={title:'بنر آزمون '+suffix,subtitle:'متن آزمایشی مجموعه',image:'/images/earrings.png',button:'دیدن مجموعه',href:'/shop',placement:'promo',active:true};
+const bannerResult=await admin.call('admin/banners',bannerData);assert.equal(bannerResult.status,200);const bannerId=bannerResult.data.find((r:{title:string})=>r.title===bannerData.title).id;
+try{assert.ok((await(await fetch(base)).text()).includes(bannerData.title));await admin.call('admin/banners/'+bannerId,{...bannerData,title:'بنر ویرایش‌شده'},'PUT');assert.ok((await(await fetch(base)).text()).includes('بنر ویرایش‌شده'));await admin.call('admin/banners/'+bannerId,undefined,'DELETE');assert.ok(!(await(await fetch(base)).text()).includes('بنر ویرایش‌شده'));}finally{await db.banner.deleteMany({where:{id:bannerId}});}console.log('PASS: banner create/edit/delete');
+const customerRows=(await admin.call('admin/customers')).data;assert.ok(customerRows.find((r:{id:string;orders:{id:string}[]})=>r.id===userId)?.orders.some((o:{id:string})=>o.id===orderId));
+assert.equal((await admin.call('admin/reviews/'+reviewId,{approved:false},'PUT')).status,200);assert.equal((await db.review.findUniqueOrThrow({where:{id:reviewId}})).approved,false);assert.equal((await admin.call('admin/reviews/'+reviewId,undefined,'DELETE')).status,200);
+assert.equal((await customer.call('wishlist',{productId:id})).data.length,0);
+await customer.call('auth/logout',{});assert.equal((await customer.call('me')).data,null);assert.equal((await customer.call('account/orders')).status,401);console.log('PASS: customer order visibility, moderation, wishlist removal, logout');
+try {await admin.call('admin/settings',{...settings,heroTitle:'آزمون محتوای زنده'});assert.ok((await(await fetch(base)).text()).includes('آزمون محتوای زنده'));}finally{await admin.call('admin/settings',settings);}console.log('PASS: CMS content immediately updates');
+await admin.call('admin/products/'+id,{...product,name:'ویرایش تأییدشده',description:'آزمون </script><script id="cms-injection">test</script>'},'PUT');
+const encodedPage=await(await fetch(base+'/product/'+slug)).text();assert.ok(encodedPage.includes('\\u003c/script>'));assert.ok(!encodedPage.includes('<script id="cms-injection">'));console.log('PASS: structured-data script escaping regression');
+await admin.call('admin/products/'+id,undefined,'DELETE');assert.ok((await(await fetch(base+'/product/'+slug)).text()).includes('این صفحه پیدا نشد'));assert.ok(!(await(await fetch(base+'/shop')).text()).includes('ویرایش تأییدشده'));console.log('PASS: disable removes product from storefront');
+assert.equal((await guest.call('cart',{productId:id,variant:'طلایی / استاندارد',quantity:0,replace:true})).status,200);assert.equal((await guest.call('cart')).data.length,0);console.log('PASS: disabled cart item removal regression');
+for(const path of ['/','/shop','/shop?q=مروارید','/product/jewel-1','/cart','/checkout','/account','/admin/login','/sitemap.xml','/robots.txt'])assert.equal((await fetch(base+path)).status,200,path);
+const csrf=await fetch(base+'/api/newsletter',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://evil.example'},body:JSON.stringify({email})});assert.equal(csrf.status,403);
+console.log('PASS: route smoke checks and cross-origin rejection');
+}finally{if(orderId)await db.order.delete({where:{id:orderId}});if(id){await db.cartItem.deleteMany({where:{productId:id}});await db.product.delete({where:{id}});}if(userId)await db.user.delete({where:{id:userId}});await db.coupon.update({where:{id:originalCoupon.id},data:{used:originalCoupon.used}});}
+}
+run().finally(()=>db.$disconnect());

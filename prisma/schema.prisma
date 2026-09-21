@@ -1,0 +1,218 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  password String
+  name String
+  mobile String @default("")
+  role String @default("CUSTOMER")
+  createdAt DateTime @default(now())
+  sessions Session[]
+  addresses Address[]
+  orders Order[]
+  reviews Review[]
+  wishlist Wishlist[]
+  cart Cart?
+}
+model Session {
+  id String @id
+  userId String
+  user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+  expiresAt DateTime
+  @@index([expiresAt])
+}
+model Category {
+  id String @id @default(cuid())
+  name String
+  slug String @unique
+  image String @default("")
+  active Boolean @default(true)
+  featured Boolean @default(true)
+  products Product[]
+}
+model Brand {
+  id String @id @default(cuid())
+  name String @unique
+  products Product[]
+}
+model Product {
+  id String @id @default(cuid())
+  name String
+  slug String @unique
+  sku String @unique
+  description String
+  price Int
+  salePrice Int?
+  stock Int @default(0)
+  material String @default("نقره با روکش طلا")
+  specifications Json @default("{}")
+  featured Boolean @default(false)
+  active Boolean @default(true)
+  popularity Int @default(0)
+  seoTitle String @default("")
+  seoDescription String @default("")
+  collection String @default("ماه و نور")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  categoryId String
+  category Category @relation(fields:[categoryId], references:[id])
+  brandId String?
+  brand Brand? @relation(fields:[brandId], references:[id])
+  images ProductImage[]
+  variants ProductVariant[]
+  cartItems CartItem[]
+  orderItems OrderItem[]
+  wishlists Wishlist[]
+  reviews Review[]
+  @@index([active,categoryId,createdAt])
+  @@index([price])
+}
+model ProductImage {
+  id String @id @default(cuid())
+  url String
+  alt String @default("")
+  position Int @default(0)
+  productId String
+  product Product @relation(fields:[productId], references:[id], onDelete:Cascade)
+}
+model ProductVariant {
+  id String @id @default(cuid())
+  color String
+  size String @default("استاندارد")
+  stock Int @default(0)
+  productId String
+  product Product @relation(fields:[productId], references:[id], onDelete:Cascade)
+  @@unique([productId,color,size])
+}
+model Cart {
+  id String @id @default(cuid())
+  userId String? @unique
+  user User? @relation(fields:[userId], references:[id], onDelete:Cascade)
+  items CartItem[]
+  updatedAt DateTime @updatedAt
+}
+model CartItem {
+  id String @id @default(cuid())
+  cartId String
+  cart Cart @relation(fields:[cartId], references:[id], onDelete:Cascade)
+  productId String
+  product Product @relation(fields:[productId], references:[id])
+  variant String @default("")
+  quantity Int
+  @@unique([cartId,productId,variant])
+}
+model Wishlist {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+  productId String
+  product Product @relation(fields:[productId], references:[id], onDelete:Cascade)
+  @@unique([userId,productId])
+}
+model Address {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+  name String
+  mobile String
+  province String
+  city String
+  address String
+  postalCode String
+}
+model Order {
+  id String @id @default(cuid())
+  userId String?
+  user User? @relation(fields:[userId], references:[id])
+  email String
+  address Json
+  notes String @default("")
+  shippingMethod String @default("standard")
+  status String @default("Pending")
+  paymentStatus String @default("UNPAID")
+  paymentReference String? @unique
+  subtotal Int
+  shipping Int
+  discount Int @default(0)
+  total Int
+  couponCode String?
+  createdAt DateTime @default(now())
+  items OrderItem[]
+  @@index([userId,createdAt])
+  @@index([status,createdAt])
+}
+model OrderItem {
+  id String @id @default(cuid())
+  orderId String
+  order Order @relation(fields:[orderId], references:[id], onDelete:Cascade)
+  productId String
+  product Product @relation(fields:[productId], references:[id])
+  name String
+  variant String @default("")
+  quantity Int
+  price Int
+}
+model Coupon {
+  id String @id @default(cuid())
+  code String @unique
+  type String @default("percentage")
+  value Int
+  minimum Int @default(0)
+  maximum Int?
+  expiresAt DateTime?
+  usageLimit Int @default(100)
+  used Int @default(0)
+  active Boolean @default(true)
+}
+model Review {
+  id String @id @default(cuid())
+  productId String
+  product Product @relation(fields:[productId], references:[id], onDelete:Cascade)
+  userId String
+  user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+  rating Int
+  text String
+  approved Boolean @default(false)
+  createdAt DateTime @default(now())
+  @@unique([userId,productId])
+}
+model Banner {
+  id String @id @default(cuid())
+  title String
+  subtitle String
+  image String
+  button String
+  href String
+  placement String @default("promo")
+  active Boolean @default(true)
+}
+model SiteSettings {
+  id String @id @default("main")
+  brandName String @default("ماه‌نشان")
+  announcement String @default("ارسال رایگان برای سفارش‌های بالای ۳ میلیون تومان")
+  heroTitle String @default("درخشش، به زبان تو")
+  heroSubtitle String @default("زیورهایی برای لحظه‌هایی که از آنِ تو هستند")
+  heroImage String @default("/images/hero.png")
+  heroButton String @default("کشف مجموعه")
+  heroLink String @default("/shop")
+  contact String @default("۰۲۱–۲۲۳۴۵۶۷۸")
+  email String @default("hello@mahneshan.example")
+  socialLinks Json @default("{}")
+  footer String @default("ماه‌نشان؛ زیبایی در جزئیات ماندگار")
+}
+model Newsletter {
+  id String @id @default(cuid())
+  email String @unique
+  createdAt DateTime @default(now())
+}
+model RateLimit {
+  key String @id
+  count Int @default(1)
+  expiresAt DateTime
+}

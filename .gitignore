@@ -1,0 +1,21 @@
+node_modules/
+.next/
+.next-dev/
+.env
+.env.*
+!.env.example
+.data/
+*.log
+test-results/
+playwright-report/
+tsconfig.tsbuildinfo
+
+# Local caches and temporary output
+.cache/
+coverage/
+dist/
+out/
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
