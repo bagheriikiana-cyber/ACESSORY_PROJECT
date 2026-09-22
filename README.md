@@ -8,7 +8,7 @@ Next.js App Router, React, TypeScript, Prisma and PostgreSQL power the Persian R
 
 ## Requirements and installation
 
-Node.js 22.6+ (verified with Node 24), pnpm 11, PostgreSQL 18 locally or a supported managed PostgreSQL database.
+Node.js 24, pnpm 11, PostgreSQL 18 locally or a supported managed PostgreSQL database.
 
 ```sh
 pnpm install --frozen-lockfile
@@ -72,7 +72,9 @@ pnpm start
 
 Run `pnpm test` against a running local application and development database. Tests create temporary records, exercise real HTTP routes and PostgreSQL, then clean up their test records. It intentionally mutates site settings briefly and must never run against a public production store.
 
-The development build uses `.next-dev`, and the production build uses `.next`, so production validation does not corrupt the running development preview. Both scripts bind to loopback by default. For deployment, run `next start --hostname 0.0.0.0` behind an HTTPS reverse proxy on a Node-compatible host, provision durable PostgreSQL, set environment variables, run `prisma migrate deploy`, then build and start. Configure process supervision, database backups and server-side logs. No public hosting or GitHub repository has been provisioned in this workspace.
+Browser QA: `pnpm test:browser` uses installed Microsoft Edge (or `QA_BROWSER_CHANNEL=chrome`) against the local app and saves screenshots under ignored `.data/qa`. On Windows, stop the app before `pnpm build` so Prisma can replace its engine DLL.
+
+The development build uses `.next-dev`, and the production build uses `.next`, so production validation does not corrupt the running development preview. Both scripts bind to loopback by default. For deployment, run `next start --hostname 0.0.0.0` behind an HTTPS reverse proxy on a Node-compatible host, provision durable PostgreSQL, set environment variables, run `prisma migrate deploy`, then build and start. Configure process supervision, database backups and server-side logs. Public hosting requires a separate deployment; the source repository is connected to GitHub.
 
 ## CMS
 
@@ -101,3 +103,17 @@ Font: Vazirmatn (SIL Open Font License). Campaign and product assets: original A
 ## Blush campaign redesign
 
 The storefront redesign is scoped to `src/app/(store)/storefront.css`; admin styling and backend architecture remain intact. Six coordinated original campaign photographs live in `public/images/rose-*.jpg`. Hero, product/category images, banners and copy are still read from the CMS. `node --env-file=.env scripts/rose-content.mjs` applies the initial campaign content once, retaining a backup in `.data/rose-content-backup.json` and preserving subsequent CMS edits. Seed defaults use the new campaign assets.
+
+## Vercel + Neon production deployment
+
+1. Create a Neon database dedicated to production. Set Vercel `DATABASE_URL` to its pooled URL with TLS (`sslmode=require`, and Prisma 6 `connection_limit=1` to start). Keep the direct, unpooled URL as `DIRECT_URL` for migrations. Local PostgreSQL remains supported; when `DIRECT_URL` is absent the migration script uses `DATABASE_URL`.
+2. Import `bagheriikiana-cyber/ACESSORY_PROJECT` in Vercel, choose Next.js and Node 24. Use the committed build/install settings. Build runs Prisma generation every time, including cached installations. Separate Preview and Production database credentials.
+3. Set `APP_URL` to the final HTTPS origin and `COOKIE_SECURE=true`. Never expose database, admin or gateway secrets via `NEXT_PUBLIC_*` variables.
+4. From a trusted terminal/CI with production environment injected, run `pnpm db:migrate` (only `prisma migrate deploy`; no reset). Then set `ADMIN_EMAIL` and a unique 16–72 character `ADMIN_PASSWORD`, run `pnpm admin:init`, and remove the admin password from the environment. This creates only the administrator and site settings, without demo customers/orders; existing accounts and passwords are preserved. Demo seed is optional for development and rejects NODE_ENV=production.
+5. Deploy and run the browser acceptance flow against the public URL. Local integration tests deliberately reject public hosts. Configure backups and review application logs before accepting real orders.
+
+CMS images are stored as URLs, never written to ephemeral serverless disk. Static campaign files are bundled under `public/images`. Upload new images using your storage provider dashboard, then paste their HTTPS URLs into CMS. Add its exact public hostname to comma-separated `IMAGE_HOSTS` and redeploy; both validation and Next/Image use that allowlist. No storage credentials are required in the application for this URL-based workflow. Optional direct uploads should use server-issued short-lived upload URLs; never put provider secret keys in client code.
+
+Payment remains manual and unpaid. Add the gateway adapter at `src/lib/payment.ts`; wire a callback route into `src/app/api/[...path]/route.ts` only after merchant access is available. The adapter must verify order ID, stored reference, currency and exact amount with the provider server, then atomically and idempotently mark the order PAID. A browser redirect alone is never payment evidence. `PAYMENT_MERCHANT_ID` and `PAYMENT_CALLBACK_URL` are integration requirements, not a switch that enables a gateway.
+
+Deployment references: [Vercel Prisma build guidance](https://vercel.com/kb/guide/nextjs-prisma-postgres), [Prisma Neon connections](https://docs.prisma.io/docs/orm/v6/overview/databases/neon).

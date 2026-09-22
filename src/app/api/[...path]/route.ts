@@ -7,31 +7,32 @@ import { db } from '@/lib/db';
 import { currentUser, digest, getCart, login, rateLimit } from '@/lib/auth';
 import { productInclude } from '@/lib/catalog';
 import { paymentProvider } from '@/lib/payment';
+import { imageUrl, internalLink, PublicError } from '@/lib/validation';
 
 const text = z.string().trim().min(1).max(500);
-const imageUrl = z.string().refine(v => v.startsWith('/images/') || /^https:\/\//.test(v), 'نشانی تصویر معتبر نیست');
 const productSchema = z.object({ name: text, slug: z.string().regex(/^[a-z0-9-]+$/), sku: text, description: z.string().min(1).max(10000), price: z.coerce.number().int().positive().max(1000000000), salePrice: z.coerce.number().int().positive().nullable().optional(), stock: z.coerce.number().int().min(0), categoryId: text, brandId: z.string().nullable().optional(), material: text, specifications: z.record(z.string()).default({}), featured: z.boolean(), active: z.boolean(), seoTitle: z.string().default(''), seoDescription: z.string().default(''), collection: z.string().default('ماه و نور'), images: z.array(imageUrl).min(1).max(12), variants: z.array(z.object({ color: text, size: text, stock: z.coerce.number().int().min(0) })).max(30) }).refine(p => !p.salePrice || p.salePrice <= p.price, 'قیمت تخفیف باید کمتر از قیمت اصلی باشد');
 const addressSchema = z.object({ name: text, mobile: z.string().regex(/^09\d{9}$/, 'شماره موبایل ۱۱ رقمی وارد کنید'), province: text, city: text, address: z.string().min(10).max(1000), postalCode: z.string().regex(/^\d{10}$/, 'کد پستی ۱۰ رقمی وارد کنید') });
 const couponSchema = z.object({ code: text.transform(s => s.toUpperCase()), type: z.enum(['percentage','fixed']), value: z.coerce.number().int().positive(), minimum: z.coerce.number().int().min(0), maximum: z.coerce.number().int().positive().nullable(), expiresAt: z.string().datetime().nullable(), usageLimit: z.coerce.number().int().positive(), active: z.boolean() }).refine(c => c.type !== 'percentage' || c.value <= 100);
 function discountFor(c: { active:boolean; expiresAt:Date|null; used:number; usageLimit:number; minimum:number; type:string; value:number; maximum:number|null } | null, subtotal:number) {
-  if (!c || !c.active || (c.expiresAt && c.expiresAt < new Date()) || c.used >= c.usageLimit || subtotal < c.minimum) throw new Error('کد تخفیف قابل استفاده نیست');
+  if (!c || !c.active || (c.expiresAt && c.expiresAt < new Date()) || c.used >= c.usageLimit || subtotal < c.minimum) throw new PublicError('کد تخفیف قابل استفاده نیست');
   return Math.min(subtotal, c.maximum ?? subtotal, c.type === 'percentage' ? Math.floor(subtotal * c.value / 100) : c.value);
 }
 async function handler(req:NextRequest, ctx:{ params:Promise<{path:string[]}> }) {
   try {
     const path = (await ctx.params).path; const route = path.join('/'); const method = req.method;
     if (method !== 'GET') { const origin = req.headers.get('origin'); if (origin && origin !== new URL(req.url).origin && origin !== process.env.APP_URL) return NextResponse.json({ error:'درخواست نامعتبر' },{status:403}); }
+    if (['auth/logout','auth/login','auth/register','newsletter','checkout','coupon','reviews'].includes(route) && method !== 'POST') return NextResponse.json({error:'روش درخواست نامعتبر'},{status:405});
     if (method === 'GET' && ['auth/logout','auth/login','auth/register','newsletter','checkout','coupon','reviews'].includes(route)) return NextResponse.json({error:'روش درخواست نامعتبر'},{status:405});
     const user = await currentUser();
     const body = method === 'GET' || method === 'DELETE' ? {} : await req.json();
     if (route === 'auth/logout') { const jar = await cookies(); const token = jar.get('session')?.value; if(token) await db.session.deleteMany({where:{id:digest(token)}}); jar.delete('session'); return NextResponse.json({ok:true}); }
     if (route === 'auth/login' || route === 'auth/register') {
-      const credentials = z.object({email:z.string().email().max(200).transform(s=>s.toLowerCase()),password:z.string().min(10).max(100),name:text.optional()}).parse(body);
+      const credentials = z.object({email:z.string().email().max(200).transform(s=>s.toLowerCase()),password:z.string().min(10).max(100).refine(v=>Buffer.byteLength(v,'utf8')<=72,'گذرواژه بیش از حد طولانی است'),name:text.optional()}).parse(body);
       await rateLimit(`auth:${credentials.email}`);
       await rateLimit(`auth-ip:${req.headers.get('x-real-ip') || 'local'}`,100);
       let account = await db.user.findUnique({where:{email:credentials.email}});
-      if(route.endsWith('register')) { if(account) throw new Error('این ایمیل قبلاً ثبت شده است'); account = await db.user.create({data:{email:credentials.email,password:await hash(credentials.password,12),name:credentials.name || 'همراه ماه‌نشان'}}); }
-      else if(!account || !await compare(credentials.password,account.password)) throw new Error('ایمیل یا گذرواژه نادرست است');
+      if(route.endsWith('register')) { if(account) throw new PublicError('این ایمیل قبلاً ثبت شده است'); account = await db.user.create({data:{email:credentials.email,password:await hash(credentials.password,12),name:credentials.name || 'همراه ماه‌نشان'}}); }
+      else if(!account || !await compare(credentials.password,account.password)) throw new PublicError('ایمیل یا گذرواژه نادرست است');
       await login(account!.id); return NextResponse.json({ok:true,role:account!.role});
     }
     if(route === 'me') return NextResponse.json(user ? {id:user.id,name:user.name,email:user.email,mobile:user.mobile,role:user.role} : null);
@@ -45,12 +46,12 @@ async function handler(req:NextRequest, ctx:{ params:Promise<{path:string[]}> })
           return NextResponse.json(await db.cartItem.findMany({where:{cartId:cart.id},include:{product:{include:productInclude}}}));
         }
         const product=await db.product.findUnique({where:{id:item.productId},include:{variants:true,category:true}});
-        if(!product?.active || !product.category.active) throw new Error('محصول موجود نیست');
+        if(!product?.active || !product.category.active) throw new PublicError('محصول موجود نیست');
         const variant=product.variants.find(v=>`${v.color} / ${v.size}`===item.variant);
-        if(product.variants.length && !variant) throw new Error('رنگ و اندازه را انتخاب کنید');
+        if(product.variants.length && !variant) throw new PublicError('رنگ و اندازه را انتخاب کنید');
         const where={cartId_productId_variant:{cartId:cart.id,productId:item.productId,variant:item.variant}};
         const old=await db.cartItem.findUnique({where}); const quantity=item.replace ? item.quantity : (old?.quantity??0)+item.quantity;
-        if(quantity>product.stock || (variant && quantity>variant.stock)) throw new Error('تعداد بیشتر از موجودی است');
+        if(quantity>product.stock || (variant && quantity>variant.stock)) throw new PublicError('تعداد بیشتر از موجودی است');
         if(!quantity) await db.cartItem.deleteMany({where:{cartId:cart.id,productId:item.productId,variant:item.variant}});
         else await db.cartItem.upsert({where,create:{cartId:cart.id,productId:item.productId,quantity,variant:item.variant},update:{quantity}});
       }
@@ -62,16 +63,16 @@ async function handler(req:NextRequest, ctx:{ params:Promise<{path:string[]}> })
       const cart=await getCart();
       const order=await db.$transaction(async tx=>{
         const items=await tx.cartItem.findMany({where:{cartId:cart.id},include:{product:{include:{variants:true,category:true}}}});
-        if(!items.length) throw new Error('سبد خرید خالی است');
+        if(!items.length) throw new PublicError('سبد خرید خالی است');
         const subtotal=items.reduce((a,i)=>a+(i.product.salePrice??i.product.price)*i.quantity,0);
         const coupon=data.coupon?await tx.coupon.findUnique({where:{code:data.coupon.toUpperCase()}}):null;
         const discount=data.coupon?discountFor(coupon,subtotal):0;
-        if(coupon) { const changed=await tx.coupon.updateMany({where:{id:coupon.id,used:coupon.used},data:{used:{increment:1}}}); if(!changed.count) throw new Error('دوباره تلاش کنید'); }
+        if(coupon) { const changed=await tx.coupon.updateMany({where:{id:coupon.id,used:coupon.used},data:{used:{increment:1}}}); if(!changed.count) throw new PublicError('دوباره تلاش کنید'); }
         for(const item of items) {
-          if(!item.product.active || !item.product.category.active) throw new Error('محصول غیرفعال شده است');
+          if(!item.product.active || !item.product.category.active) throw new PublicError('محصول غیرفعال شده است');
           const updated=await tx.product.updateMany({where:{id:item.productId,stock:{gte:item.quantity}},data:{stock:{decrement:item.quantity},popularity:{increment:item.quantity}}});
-          if(!updated.count) throw new Error('موجودی محصول کافی نیست');
-          if(item.product.variants.length) { const v=item.product.variants.find(v=>`${v.color} / ${v.size}`===item.variant); if(!v) throw new Error('تنوع محصول تغییر کرده است'); const changed=await tx.productVariant.updateMany({where:{id:v.id,stock:{gte:item.quantity}},data:{stock:{decrement:item.quantity}}}); if(!changed.count) throw new Error('موجودی رنگ انتخابی کافی نیست'); }
+          if(!updated.count) throw new PublicError('موجودی محصول کافی نیست');
+          if(item.product.variants.length) { const v=item.product.variants.find(v=>`${v.color} / ${v.size}`===item.variant); if(!v) throw new PublicError('تنوع محصول تغییر کرده است'); const changed=await tx.productVariant.updateMany({where:{id:v.id,stock:{gte:item.quantity}},data:{stock:{decrement:item.quantity}}}); if(!changed.count) throw new PublicError('موجودی رنگ انتخابی کافی نیست'); }
         }
         const shipping=data.shippingMethod==='express'?150000:subtotal>=3000000?0:80000;
         const created=await tx.order.create({data:{userId:user?.id,email:data.email,address:data.address,notes:data.notes,shippingMethod:data.shippingMethod,subtotal,shipping,discount,total:subtotal+shipping-discount,couponCode:coupon?.code,items:{create:items.map(i=>({productId:i.productId,name:i.product.name,variant:i.variant,quantity:i.quantity,price:i.product.salePrice??i.product.price}))}}});
@@ -82,7 +83,7 @@ async function handler(req:NextRequest, ctx:{ params:Promise<{path:string[]}> })
       return NextResponse.json({id:order.id,total:order.total,payment});
     }
     if(route==='wishlist') { if(!user) return NextResponse.json({error:'ابتدا وارد حساب شوید'},{status:401}); if(method==='POST') { const {productId}=z.object({productId:text}).parse(body); const where={userId_productId:{userId:user.id,productId}}; const old=await db.wishlist.findUnique({where}); if(old) await db.wishlist.delete({where}); else await db.wishlist.create({data:{userId:user.id,productId}}); } return NextResponse.json(await db.wishlist.findMany({where:{userId:user.id},include:{product:{include:productInclude}}})); }
-    if(route==='reviews') { if(!user) throw new Error('ابتدا وارد حساب شوید'); const data=z.object({productId:text,rating:z.number().int().min(1).max(5),text:z.string().min(5).max(1500)}).parse(body); await db.review.upsert({where:{userId_productId:{userId:user.id,productId:data.productId}},create:{...data,userId:user.id},update:{...data,approved:false}}); return NextResponse.json({ok:true}); }
+    if(route==='reviews') { if(!user) throw new PublicError('ابتدا وارد حساب شوید'); const data=z.object({productId:text,rating:z.number().int().min(1).max(5),text:z.string().min(5).max(1500)}).parse(body); await db.review.upsert({where:{userId_productId:{userId:user.id,productId:data.productId}},create:{...data,userId:user.id},update:{...data,approved:false}}); return NextResponse.json({ok:true}); }
     if(path[0]==='account') {
       if(!user) return NextResponse.json({error:'ابتدا وارد حساب شوید'},{status:401});
       if(path[1]==='profile' && method==='POST') {const data=z.object({name:text,mobile:z.string().regex(/^09\d{9}$/)}).parse(body); await db.user.update({where:{id:user.id},data});return NextResponse.json({ok:true});}
@@ -97,12 +98,12 @@ async function handler(req:NextRequest, ctx:{ params:Promise<{path:string[]}> })
         if(method==='DELETE') await db.product.update({where:{id},data:{active:false}});
         return NextResponse.json(await db.product.findMany({include:productInclude,orderBy:{createdAt:'desc'}}));
       }
-      if(resource==='categories') { if(method==='POST'||method==='PUT'){const data=z.object({name:text,slug:z.string().regex(/^[a-z0-9-]+$/),image:z.string(),active:z.boolean(),featured:z.boolean()}).parse(body); if(id) await db.category.update({where:{id},data}); else await db.category.create({data});} if(method==='DELETE') await db.category.update({where:{id},data:{active:false}});return NextResponse.json(await db.category.findMany()); }
+      if(resource==='categories') { if(method==='POST'||method==='PUT'){const data=z.object({name:text,slug:z.string().regex(/^[a-z0-9-]+$/),image:imageUrl.or(z.literal('')),active:z.boolean(),featured:z.boolean()}).parse(body); if(id) await db.category.update({where:{id},data}); else await db.category.create({data});} if(method==='DELETE') await db.category.update({where:{id},data:{active:false}});return NextResponse.json(await db.category.findMany()); }
       if(resource==='brands') { if(method==='POST') await db.brand.create({data:{name:text.parse(body.name)}}); return NextResponse.json(await db.brand.findMany()); }
       if(resource==='coupons') { if(method==='POST'||method==='PUT'){const data=couponSchema.parse(body); if(id) await db.coupon.update({where:{id},data});else await db.coupon.create({data});} if(method==='DELETE')await db.coupon.delete({where:{id}});return NextResponse.json(await db.coupon.findMany()); }
-      if(resource==='banners') {if(method==='POST'||method==='PUT'){const data=z.object({title:text,subtitle:text,image:imageUrl,button:text,href:z.string().startsWith('/'),placement:z.enum(['promo','collection']),active:z.boolean()}).parse(body);if(id)await db.banner.update({where:{id},data});else await db.banner.create({data});}if(method==='DELETE')await db.banner.delete({where:{id}});return NextResponse.json(await db.banner.findMany());}
-      if(resource==='settings') {if(method==='POST'){const data=z.object({brandName:text,announcement:text,heroTitle:text,heroSubtitle:text,heroImage:imageUrl,heroButton:text,heroLink:z.string().startsWith('/'),contact:text,email:z.string().email(),footer:text,socialLinks:z.record(z.string().url())}).parse(body);await db.siteSettings.update({where:{id:'main'},data});}return NextResponse.json(await db.siteSettings.findUnique({where:{id:'main'}}));}
-      if(resource==='orders') {if(method==='PUT'){const {status}=z.object({status:z.enum(['Pending','Processing','Shipped','Delivered','Cancelled'])}).parse(body);await db.$transaction(async tx=>{const old=await tx.order.findUniqueOrThrow({where:{id},include:{items:true}});if(old.status==='Cancelled' && status!=='Cancelled')throw new Error('سفارش لغوشده قابل بازگشت نیست');if(status==='Cancelled'&&old.status!=='Cancelled'){for(const item of old.items){await tx.product.update({where:{id:item.productId},data:{stock:{increment:item.quantity}}}); const [color,size]=item.variant.split(' / ');if(color&&size)await tx.productVariant.updateMany({where:{productId:item.productId,color,size},data:{stock:{increment:item.quantity}}});}}await tx.order.update({where:{id},data:{status}});},{isolationLevel:'Serializable'});}return NextResponse.json(await db.order.findMany({include:{items:true,user:{select:{name:true}}},orderBy:{createdAt:'desc'}}));}
+      if(resource==='banners') {if(method==='POST'||method==='PUT'){const data=z.object({title:text,subtitle:text,image:imageUrl,button:text,href:internalLink,placement:z.enum(['promo','collection']),active:z.boolean()}).parse(body);if(id)await db.banner.update({where:{id},data});else await db.banner.create({data});}if(method==='DELETE')await db.banner.delete({where:{id}});return NextResponse.json(await db.banner.findMany());}
+      if(resource==='settings') {if(method==='POST'){const data=z.object({brandName:text,announcement:text,heroTitle:text,heroSubtitle:text,heroImage:imageUrl,heroButton:text,heroLink:internalLink,contact:text,email:z.string().email(),footer:text,socialLinks:z.record(z.string().url().refine(v=>/^https:\/\//.test(v)))}).parse(body);await db.siteSettings.update({where:{id:'main'},data});}return NextResponse.json(await db.siteSettings.findUnique({where:{id:'main'}}));}
+      if(resource==='orders') {if(method==='PUT'){const {status}=z.object({status:z.enum(['Pending','Processing','Shipped','Delivered','Cancelled'])}).parse(body);await db.$transaction(async tx=>{const old=await tx.order.findUniqueOrThrow({where:{id},include:{items:true}});if(old.status==='Cancelled' && status!=='Cancelled')throw new PublicError('سفارش لغوشده قابل بازگشت نیست');if(status==='Cancelled'&&old.status!=='Cancelled'){for(const item of old.items){await tx.product.update({where:{id:item.productId},data:{stock:{increment:item.quantity}}}); const [color,size]=item.variant.split(' / ');if(color&&size)await tx.productVariant.updateMany({where:{productId:item.productId,color,size},data:{stock:{increment:item.quantity}}});}}await tx.order.update({where:{id},data:{status}});},{isolationLevel:'Serializable'});}return NextResponse.json(await db.order.findMany({include:{items:true,user:{select:{name:true}}},orderBy:{createdAt:'desc'}}));}
       if(resource==='customers')return NextResponse.json(await db.user.findMany({select:{id:true,name:true,email:true,mobile:true,createdAt:true,orders:{include:{items:true}}},orderBy:{createdAt:'desc'}}));
       if(resource==='reviews'){if(method==='PUT')await db.review.update({where:{id},data:{approved:z.boolean().parse(body.approved)}});if(method==='DELETE')await db.review.delete({where:{id}});return NextResponse.json(await db.review.findMany({include:{product:{select:{name:true}},user:{select:{name:true}}}}));}
     }
@@ -110,7 +111,10 @@ async function handler(req:NextRequest, ctx:{ params:Promise<{path:string[]}> })
   } catch(error) {
     if(error instanceof z.ZodError)return NextResponse.json({error:error.issues.map(i=>`${i.path.join('.')}: ${i.message}`).join('، ')},{status:400});
     if(error instanceof Prisma.PrismaClientKnownRequestError)return NextResponse.json({error:error.code==='P2002'?'این مقدار قبلاً ثبت شده است':error.code==='P2034'?'اطلاعات هم‌زمان تغییر کرد؛ دوباره تلاش کنید':'عملیات پایگاه داده انجام نشد'},{status:409});
-    return NextResponse.json({error:error instanceof Error?error.message:'خطای سرور'},{status:400});
+    if(error instanceof PublicError)return NextResponse.json({error:error.message},{status:400});
+    if(error instanceof SyntaxError)return NextResponse.json({error:'داده ارسالی معتبر نیست'},{status:400});
+    console.error('API request failed', {type:error instanceof Error?error.name:'UnknownError'});
+    return NextResponse.json({error:'خطای سرور؛ دوباره تلاش کنید'},{status:500});
   }
 }
 export {handler as GET,handler as POST,handler as PUT,handler as DELETE};

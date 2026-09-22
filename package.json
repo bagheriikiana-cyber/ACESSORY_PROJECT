@@ -4,14 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start --hostname 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "db:start": "node scripts/database.mjs",
-    "db:migrate": "prisma migrate deploy",
+    "db:migrate": "node --env-file-if-exists=.env scripts/migrate.mjs",
+    "admin:init": "node --env-file-if-exists=.env --import tsx scripts/admin-init.ts",
     "db:seed": "node --env-file=.env --import tsx prisma/seed.ts",
-    "test": "node --env-file=.env --import tsx tests/integration.ts"
+    "test": "node --env-file=.env --import tsx tests/integration.ts",
+    "test:browser": "node --env-file=.env tests/browser-qa.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.19.0",
@@ -36,5 +38,8 @@
     "tailwindcss": "^4.1.0",
     "tsx": "^4.20.0",
     "typescript": "^5.8.0"
+  },
+  "engines": {
+    "node": ">=24 <25"
   }
 }

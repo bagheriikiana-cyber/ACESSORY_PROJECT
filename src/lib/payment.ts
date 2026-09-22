@@ -1,6 +1,6 @@
 export interface PaymentProvider {
   create(input: { orderId: string; amountToman: number }): Promise<{ reference: string; redirectUrl: string | null; status: 'UNPAID' }>;
-  verify(reference: string): Promise<{ paid: boolean }>;
+  verify(input: { reference: string; orderId: string; expectedAmountToman: number }): Promise<{ paid: boolean; verifiedAmountToman?: number }>;
 }
 class ManualPaymentProvider implements PaymentProvider {
   async create({ orderId }: { orderId: string; amountToman: number }) { return { reference: `manual-${orderId}`, redirectUrl: null, status: 'UNPAID' as const }; }

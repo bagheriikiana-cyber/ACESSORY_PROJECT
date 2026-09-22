@@ -2,12 +2,21 @@ import assert from 'node:assert/strict';
 import { PrismaClient } from '@prisma/client';
 const db=new PrismaClient();
 const base=process.env.APP_URL||'http://localhost:3000';
+if(!['localhost','127.0.0.1','[::1]'].includes(new URL(base).hostname))throw new Error('Integration tests require a local development application.');
 class Client { jar=new Map<string,string>(); async call(path:string,data?:unknown,method?:string){const r=await fetch(base+'/api/'+path,{method:method||(data===undefined?'GET':'POST'),headers:{'Content-Type':'application/json','Origin':base,'Cookie':[...this.jar].map(([k,v])=>`${k}=${v}`).join('; ')},body:data===undefined?undefined:JSON.stringify(data)});for(const c of r.headers.getSetCookie()){const [key,value]=c.split(';')[0].split('=');this.jar.set(key,value);}return {status:r.status,data:await r.json()};}}
 async function run(){
 const admin=new Client(),guest=new Client(),customer=new Client();
 assert.equal((await guest.call('admin/products')).status,403);
 assert.equal((await admin.call('auth/login',{email:process.env.SEED_ADMIN_EMAIL||'admin@mahneshan.local',password:process.env.SEED_ADMIN_PASSWORD})).status,200);
 const categories=(await admin.call('admin/categories')).data;
+assert.equal((await guest.call('auth/logout',{},'PUT')).status,405);
+assert.equal((await admin.call('admin/categories',{name:'invalid image',slug:'invalid-image',image:'https://unapproved.example/image.jpg',active:true,featured:true})).status,400);
+const malformed=await fetch(base+'/api/newsletter',{method:'POST',headers:{'Content-Type':'application/json',Origin:base},body:'{'});
+assert.equal(malformed.status,400);assert.ok(!(await malformed.text()).includes('SyntaxError'));
+const originalSettings=(await admin.call('admin/settings')).data;
+assert.equal((await admin.call('admin/settings',{...originalSettings,heroLink:'//evil.example'})).status,400);
+assert.equal((await admin.call('admin/settings',{...originalSettings,socialLinks:{test:'javascript:alert(1)'}})).status,400);
+console.log('PASS: mutation methods, image allowlist, internal links, malformed JSON');
 const originalCoupon=await db.coupon.findUniqueOrThrow({where:{code:'WELCOME10'}});
 const suffix=Date.now();const slug='cms-test-'+suffix;
 const product={name:'زیور آزمایشی مدیریت '+suffix,slug,sku:'TEST-'+suffix,description:'محصول آزمون یکپارچه مدیریت و فروشگاه',price:2000000,salePrice:null,stock:4,categoryId:categories[0].id,brandId:null,material:'نقره',specifications:{'جنس':'نقره'},featured:true,active:true,seoTitle:'',seoDescription:'',collection:'آزمون',images:['/images/rose-ring.jpg'],variants:[{color:'طلایی',size:'استاندارد',stock:4}]};

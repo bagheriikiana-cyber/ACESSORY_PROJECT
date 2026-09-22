@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { hash } from 'bcryptjs';
 const db=new PrismaClient();
 async function main(){
+if(process.env.NODE_ENV==='production')throw new Error('Demo seed is disabled in production. Use pnpm admin:init instead.');
 if(!process.env.SEED_ADMIN_PASSWORD || process.env.SEED_ADMIN_PASSWORD==='CHANGE_THIS_BEFORE_SEEDING')throw new Error('Set a strong SEED_ADMIN_PASSWORD first');
 const admin=await db.user.upsert({where:{email:process.env.SEED_ADMIN_EMAIL||'admin@mahneshan.local'},update:{},create:{email:process.env.SEED_ADMIN_EMAIL||'admin@mahneshan.local',name:'مدیر ماه‌نشان',password:await hash(process.env.SEED_ADMIN_PASSWORD,12),role:'ADMIN'}});
 const customer=await db.user.upsert({where:{email:'sara@example.com'},update:{},create:{email:'sara@example.com',name:'سارا مهران',mobile:'09121234567',password:await hash(process.env.SEED_CUSTOMER_PASSWORD || randomBytes(32).toString('hex'),12)}});

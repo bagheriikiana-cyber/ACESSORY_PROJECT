@@ -17,3 +17,5 @@
 
 /* Keep editorial headings balanced at intermediate desktop widths. */
 .storefront .hero h1,.storefront .campaign h2,.storefront .editorial-copy h2{text-wrap:balance}
+
+dialog.zoom{margin:0;width:100%;max-width:none;height:100%;max-height:none;border:0}dialog.zoom:not([open]){display:none}
